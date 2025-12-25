@@ -34,14 +34,15 @@ def build_global_pipeline_from_weights(df_schema: pd.DataFrame, coef: np.ndarray
     categorical_cols = [c for c in categorical_cols if c not in numeric_cols]
 
     preprocessor = build_preprocessor(categorical_cols, numeric_cols)
-    pipe = build_pipeline(preprocessor)
-
-    # Fit preprocess to align OHE feature space
-    pipe.named_steps["preprocess"].fit(X_full, df_schema[TARGET_COL].to_numpy())
-
-    # Set LR weights
+    
+    # Fit preprocessor first
+    preprocessor.fit(X_full, df_schema[TARGET_COL].to_numpy())
+    
+    # Create the fitted LR model from weights
     lr = create_lr_from_weights(coef=coef, intercept=intercept)
-    pipe.named_steps["clf"] = lr
+    
+    # Create pipeline with already fitted preprocessor and LR
+    pipe = Pipeline(steps=[("preprocess", preprocessor), ("clf", lr)])
     return pipe
 
 

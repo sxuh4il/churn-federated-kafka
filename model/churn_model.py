@@ -148,13 +148,31 @@ def create_lr_from_weights(coef: np.ndarray, intercept: np.ndarray) -> LogisticR
     """
     Reconstruct a fitted LogisticRegression from FedAvg weights.
     This is REQUIRED for sklearn to allow predict / predict_proba.
+    
+    We manually set the required attributes that sklearn checks in check_is_fitted().
     """
-    lr = LogisticRegression()
+    # Ensure coef has shape (1, n_features) - may come as (n_features,) from JSON
+    coef = np.array(coef, dtype=float)
+    if coef.ndim == 1:
+        coef = coef.reshape(1, -1)
+    
+    # Ensure intercept has shape (1,) - may come as scalar or list from JSON
+    intercept = np.array(intercept, dtype=float)
+    if intercept.ndim == 0:
+        intercept = intercept.reshape(1,)
+    elif intercept.ndim > 1:
+        intercept = intercept.flatten()
 
-    # Required sklearn fitted attributes
-    lr.classes_ = np.array([0, 1], dtype=int)
-    lr.coef_ = coef.astype(float)
-    lr.intercept_ = intercept.astype(float)
-    lr.n_features_in_ = coef.shape[1]
+    # Create LogisticRegression and manually set all required "fitted" attributes
+    lr = LogisticRegression(max_iter=300, solver='lbfgs')
+    
+    # Set the weights
+    lr.coef_ = coef
+    lr.intercept_ = intercept
+    
+    # Set required attributes for sklearn to recognize model as fitted
+    lr.classes_ = np.array([0, 1])  # Binary classification
+    lr.n_features_in_ = coef.shape[1]  # Number of features seen during fit
+    lr.n_iter_ = np.array([1])  # Number of iterations (required by some sklearn versions)
 
     return lr

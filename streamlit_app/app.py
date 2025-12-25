@@ -86,16 +86,18 @@ def evaluate_pipe(pipe: Pipeline, df_full: pd.DataFrame) -> Dict[str, Any]:
 def consume_latest_global_model(kafka_bootstrap: str, timeout_s: float = 3.0) -> Optional[Dict[str, Any]]:
     """
     Reads recent messages from topic global_model and returns the latest one seen within timeout_s.
-    Uses auto_offset_reset='latest' to avoid replaying the full log.
+    Uses manual partition assignment (use_assign=True) to avoid consumer group coordination
+    and prevent constant rebalancing when Streamlit reruns.
     """
     consumer = JsonKafkaConsumer(
         topics=[TOPIC_GLOBAL_MODEL],
         bootstrap_servers=kafka_bootstrap,
-        group_id=f"streamlit-global-{uuid.uuid4().hex[:8]}",
-        client_id=f"streamlit-global-consumer-{uuid.uuid4().hex[:8]}",
+        group_id=None,  # Not needed with manual assignment
+        client_id="streamlit-global-consumer",
         auto_offset_reset="earliest",
-        enable_auto_commit=True,
+        enable_auto_commit=False,
         consumer_timeout_ms=int(timeout_s * 1000),
+        use_assign=True,  # Use manual partition assignment to avoid consumer group rebalancing
     )
 
     latest = None
@@ -115,6 +117,21 @@ def request_prediction_and_wait(
     timeout_s: float = 10.0,
 ) -> Dict[str, Any]:
     request_id = uuid.uuid4().hex
+    
+    # Create consumer FIRST (before sending request) to avoid race condition
+    # Use "latest" offset to only read new messages arriving after consumer starts
+    consumer = JsonKafkaConsumer(
+        topics=[TOPIC_PREDICTIONS],
+        bootstrap_servers=kafka_bootstrap,
+        group_id=None,  # Not needed with manual assignment
+        client_id="streamlit-preds-consumer",
+        auto_offset_reset="latest",  # Only read NEW messages
+        enable_auto_commit=False,
+        consumer_timeout_ms=int(timeout_s * 1000),
+        use_assign=True,  # Use manual partition assignment to avoid consumer group rebalancing
+    )
+    
+    # Now send the request AFTER consumer is ready
     req = {
         "type": "predict_request",
         "request_id": request_id,
@@ -123,16 +140,6 @@ def request_prediction_and_wait(
         "ts": time.time(),
     }
     send_with_retry(producer, TOPIC_CLIENT_DATA, req, key=request_id)
-
-    consumer = JsonKafkaConsumer(
-        topics=[TOPIC_PREDICTIONS],
-        bootstrap_servers=kafka_bootstrap,
-        group_id=f"streamlit-preds-{uuid.uuid4().hex[:8]}",
-        client_id=f"streamlit-preds-consumer-{uuid.uuid4().hex[:8]}",
-        auto_offset_reset="earliest",
-        enable_auto_commit=True,
-        consumer_timeout_ms=int(timeout_s * 1000),
-    )
 
     result = {"status": "timeout", "request_id": request_id}
     for msg in consumer:
