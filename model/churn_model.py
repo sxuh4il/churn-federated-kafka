@@ -35,7 +35,7 @@ def load_telco_csv(csv_path: str) -> pd.DataFrame:
     - Maps target Churn: Yes/No -> 1/0
     """
     df = pd.read_csv(csv_path)
-
+    
     # Standard Telco dataset: TotalCharges sometimes has blank strings.
     if "TotalCharges" in df.columns:
         df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
